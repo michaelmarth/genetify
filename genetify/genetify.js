@@ -46,26 +46,30 @@ var genetify = {
 
     init: function(){
 
-        if (window.onerror){
-            //TODO: this is not passing in error message as string!
-            genetify._addListener(window, 'onerror', genetify.record.error);
-        }
-        else {
-            window.onerror = genetify.record.error;
-        }
+        //TODO: optimize safari load, safari init, IE init, IE vary
+
+        //TODO:
+        // if (el.addEventListener){
+        //   el.addEventListener('click', modifyText, false);
+        // } else if (el.attachEvent){
+        //   el.attachEvent('onclick', modifyText);
+        // }
+
+        window.onerror = genetify.record.error;
 
         //TODO: is onmousedown really the best solution?
-        var warnOnClick = function(e){
+        // special error for A tag and onclick
+        window.onclick = function(e){
             var _event = e || window.event;
             var target = _event.target || _event.srcElement;
             var onclickBody = target.getAttribute('onclick');
             if (target.href && onclickBody && onclickBody.indexOf('genetify.record.goal') != -1){
                 var message = 'Don\'t record clicking a link with the "onclick" event. Use "onmousedown" instead.';
-                genetify.utils.assert(false, message);
+                console.assert(false, message);
+                // because error is suppressed when event
+                genetify.record.error(message);
             }
         };
-        genetify._addListener(window, 'onclick', warnOnClick);
-
 
         if (window.location.protocol.indexOf('file:') != -1){
             genetify.config.REMOTE_BASE_URL = genetify.config.REMOTE_BASE_URL.replace('file:', 'http:');
@@ -111,16 +115,7 @@ var genetify = {
         }
 
     },
-
-    _addListener: function(elem, sig, listener){
-        if (elem.addEventListener){
-            return elem.addEventListener(sig.substr(2), listener, false);
-        }
-        else if (elem.attachEvent){
-            return elem.attachEvent(sig, listener);
-        }
-    },
-
+	
     _registerSystemObjects: function(){
         for (var p in window){
             genetify._systemObjects.push(window[p]);
@@ -248,7 +243,7 @@ var genetify = {
             var queryDict = {
                 'callback':  callback
             };
-            src = genetify.utils.buildURL('/reader.php', queryDict);
+            src = genetify.utils.buildURL('/content/gen.reader.json', queryDict);
         }
 
         //TODO: is document.write really much better?
@@ -262,7 +257,7 @@ var genetify = {
 
     vary: function(geneTypes){
         genetifyTime.begin.vary = new Date().getTime();
-
+		
         //TODO: should cookie overriding preserve original pageview_xid?
         // set to zero to overwrite any previous pageview_xid
         genetify.pageview_xid = 0;
@@ -271,6 +266,7 @@ var genetify = {
             typeof(GENETIFY_CONFIG) == 'undefined',
             'GENETIFY_CONFIG must be set before genetify.js is loaded.'
         );
+
 
         genetify.utils.assert(!genetify.config.NO_VARYING, 'NO_VARYING is set to true');
         //TODO: order of functions?
@@ -283,7 +279,7 @@ var genetify = {
             myArgs = genetify.vary.arguments;
         }
 
-        for (var i=0; i < myArgs.length; i++){
+        for (var i=0; i < myArgs.length; i++){		
             //TODO: this won't catch all bad arguments
             genetify.utils.assert(
                 validTypes.join('|').indexOf(myArgs[i]) != -1,
@@ -651,7 +647,6 @@ var genetify = {
                     else {
                         geneDict[g][j][1][k].className = baseClassname + ' genetify_enabled';
                     }
-
                 }
             }
         }
@@ -824,7 +819,8 @@ genetify.record = {
             'value': value
             //TODO: send category info to server
         };
-        genetify.utils.insertScript(genetify.utils.buildURL('/recorder.php', queryDict));
+        //genetify.utils.insertScript(genetify.utils.buildURL('/content/gen/', queryDict));
+		sendPostRequest(genetify.utils.buildURL('/content/gen/', queryDict));
 
         if (genetify.config.USE_URCHIN){
             genetify.record.urchin(name, value, category);
@@ -860,7 +856,8 @@ genetify.record = {
             'vary_time': genetifyTime.time.vary
         };
 
-        genetify.utils.insertScript(genetify.utils.buildURL('/recorder.php', queryDict));
+        //genetify.utils.insertScript(genetify.utils.buildURL('/content/gen.record.html', queryDict));
+		sendPostRequest(genetify.utils.buildURL('/content/gen/', queryDict));
     },
 
     //TODO: test this function
@@ -940,7 +937,8 @@ genetify.record = {
             'line_number': lineNumber || 0
         };
         // don't insertscript in case that is faulty
-        genetify.record._request(genetify.utils.buildURL('/recorder.php', queryDict));
+        //genetify.record._request(genetify.utils.buildURL('/content/gen.record.html', queryDict));
+		sendPostRequest(genetify.utils.buildURL('/content/gen/', queryDict));
     }
 
 };
@@ -999,7 +997,7 @@ genetify.cookie = {
         var exp = new Date();
     	exp.setTime(exp.getTime() + (hoursToExpiry * 60 * 60 * 1000));
     	var domain = document.domain;
-        genetify.utils.assert(domain != 'localhost', 'Cookies don\'t work on localhost');
+        //genetify.utils.assert(domain != 'localhost', 'Cookies don\'t work on localhost');
         var str = name + '=' + encodeURIComponent(value) + '; expires=' + exp.toGMTString() + '; domain=' + domain + '; path=/';
     	document.cookie = str;
     },
@@ -1139,10 +1137,31 @@ genetify.utils = {
         queryDict = genetify.utils.update(defaults, queryDict);
 
         var pairs = [];
+		var path = "";
         for (var key in queryDict){
-            pairs.push(key + '=' + encodeURIComponent(queryDict[key]));
+            if (key == 'genome') {
+				path="genome"
+				genes = queryDict["genome"].split(",");
+				for (var g in genes) {
+					var n = genes[g].split("=");
+					pairs.push('./genes/' + n[0] + '=' + encodeURIComponent(n[1]));
+				}
+			} else if (key == 'goal'){
+				path = 'goal/' + queryDict[key];			
+				pairs.push('./' + key + '=' + encodeURIComponent(queryDict[key]));
+			} else {						
+				pairs.push('./' + key + '=' + encodeURIComponent(queryDict[key]));
+			}
         }
-        return genetify.config.REMOTE_BASE_URL + relativePath + '?' + pairs.join('&');
+		if(relativePath != null && relativePath.indexOf('/content' == 0)) {
+			if (relativePath.indexOf(".json") == -1) {
+				return relativePath + queryDict['domain'] + '/' + path + '/*?' + pairs.join('&'); // recorder
+			} else {
+				return relativePath + '?' + pairs.join('&'); // reader
+			}
+		} else {
+        	return genetify.config.REMOTE_BASE_URL + relativePath + '?' + pairs.join('&');
+		}
     },
 
     // adapted from Prototype
